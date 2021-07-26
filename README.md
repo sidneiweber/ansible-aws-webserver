@@ -1,14 +1,15 @@
 ### Sobre
 
-Playbook Ansible que criar uma instância EC2 na AWS e já instala e faz algumas configurações do Apache. Dentre as caracteristicas o playbook executa.
+Playbook Ansible que cria uma instância EC2 na AWS, instala e faz algumas configurações do Apache. Dentre as caracteristicas o playbook executa, estão:
 
 - Criação do security group, liberando ssh somente pro nosso IP
 - Criação de uma role para utilizar na instância
 - Criação da instância EC2 na AWS (c/criação da keypair)
 - Instalação dos pacotes apache2 e amazon-cloudwatch-agent
+- Validar que a posta 80 está funcionando
 - Configuração para enviar logs do apache para o cloudwatch :nice:
 
-No final do playbook basta acessar o IP público da instância criada que o servidor já estará acessível
+No final do playbook basta acessar o IP público da instância criada que o servidor já estará acessível.
 
 ### Pré requisitos
 
@@ -17,7 +18,7 @@ No final do playbook basta acessar o IP público da instância criada que o serv
 
 ### Como executar o playbook
 
-Primeiramente precisamos ajustar algumas variáveis de ambiente, uma do Ansible para não esperar a confirmação da chave ssh e outras duas relativo ao acesso a AWS
+Primeiramente precisamos ajustar algumas variáveis de ambiente, uma do Ansible para não esperar a confirmação da chave ssh e outras duas relativo ao acesso a AWS.
 
 ```
 export AWS_ACCESS_KEY_ID="XXXXXXXXXX"
