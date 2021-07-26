@@ -1,0 +1,6 @@
+vpc_subnet_id: subnet-6929740f
+ami: ami-09e67e426f25ce0d7
+role_name: webserver-role
+key_name: webserver
+instance_type: t2.micro
+region: us-east-1

@@ -1,0 +1,164 @@
+- hosts: localhost
+  gather_facts: yes
+
+  tasks:
+
+  - name: Get the current caller identity information
+    amazon.aws.aws_caller_info:
+    register: caller_info
+
+  - name: Create a new EC2 key
+    ec2_key:
+      name: "{{ key_name }}"
+      region: "{{ region }}"
+    register: ec2_key_result
+
+  - name: Save private key
+    copy: content="{{ ec2_key_result.key.private_key }}" dest="./aws.ansible.pem" mode=0600
+    when: ec2_key_result.changed
+
+  - name: Change permission key
+    file:
+      path: aws.ansible.pem
+      mode: '0400'
+
+  - name: "Create a role"
+    community.aws.iam_role:
+      name: "{{ role_name }}"
+      assume_role_policy_document: "{{ lookup('file','./files/policy.json') }}"
+      managed_policies:
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+    register: iam_role
+
+  - name: Get external IP from checkip.amazonaws.com
+    get_url: url=http://checkip.amazonaws.com dest=./files/local_ip force=yes
+
+  - name: Read external ip from file
+    command: "cat ./files/local_ip"
+    register: local_ip
+
+  - name: Set the my_ip variable
+    set_fact:
+      my_ip: "{{local_ip.stdout}}/32"
+
+  - name: Creating Security Group for WebServer on AWS
+    ec2_group:
+      name: webserver-sg
+      description: Security Group for Web Server allowing port for http and ssh
+      region: "{{ region }}"
+      rules:
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: "{{ my_ip }}"
+      - proto: tcp
+        from_port: 80
+        to_port: 80
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 443
+        to_port: 443
+        cidr_ip: 0.0.0.0/0
+      rules_egress:
+      - proto: all
+        cidr_ip: 0.0.0.0/0
+
+  - name: Launching ec2 instance for webserver
+    ec2_instance:
+      name: webserver
+      key_name: webserver
+      instance_role: arn:aws:iam::{{ caller_info.account }}:instance-profile/{{ role_name }}
+      vpc_subnet_id: "{{ vpc_subnet_id }}"
+      instance_type: "{{ instance_type }}"
+      image_id: "{{ ami }}"
+      wait: true
+      security_group: webserver-sg
+      network:
+        assign_public_ip: true
+      region: "{{ region }}"
+      state: present
+      tags:
+        Name: webserver
+    register: ec2
+
+  - name: Add new instance to host group
+    add_host:
+      name: "webserver"
+      ansible_ssh_host: "{{ item.public_ip_address }}"
+      groups: webserver
+    with_items: "{{ ec2.instances }}"
+
+  - name: Wait for SSH to come up
+    wait_for:
+      host: "{{ item.public_ip_address }}"
+      port: 22
+      state: started
+      timeout: 300
+      delay: 10
+    with_items: "{{ ec2.instances }}"
+
+- hosts: webserver
+  gather_facts: no
+  tasks:
+    - name: Install packages
+      apt:
+        pkg:
+          - apache2
+        update_cache: yes
+      become: yes
+
+    - name: Download Cloudwatch agent
+      get_url:
+        url: https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+        dest: /tmp/
+
+    - name: Install Cloudwatch agent
+      apt:
+        deb: /tmp/amazon-cloudwatch-agent.deb
+      become: yes
+
+    - name: Copy Cloudwatch config
+      copy:
+       src: config.json
+       dest: /tmp/config.json
+
+    - name: Copy html file
+      copy:
+        src: index.html
+        dest: /var/www/html/index.html
+      become: yes
+
+    - name: Active apache ssl module
+      apache2_module:
+        state: present
+        name: ssl
+      become: yes
+
+    - name: Active ssl site
+      command: a2ensite default-ssl
+      become: yes
+
+    - name: starting web services
+      service: 
+         name: "apache2"
+         state: started
+
+    - name: starting web services
+      command: /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/tmp/config.json -s
+      become: yes
+
+- hosts: localhost
+  gather_facts: yes
+  tasks:
+
+    - name: Wait for Webserver to come up
+      wait_for:
+        host: "{{ item.public_ip_address }}"
+        port: 80
+        state: started
+      with_items: "{{ ec2.instances }}"
+
+    - name: Show Address to access
+      debug:
+        msg: "Access link http://{{ item.public_ip_address }}"
+      with_items: "{{ ec2.instances }}"
